@@ -1,14 +1,14 @@
 ﻿using System.Data.Common;
 using System.Text;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-DbProviderFactories.RegisterFactory("sqlite", SqliteFactory.Instance);
-DbProviderFactory factory = DbProviderFactories.GetFactory("sqlite");
+DbProviderFactories.RegisterFactory("npgsql", NpgsqlFactory.Instance);
+DbProviderFactory factory = DbProviderFactories.GetFactory("npgsql");
 
 using DbConnection connection = factory.CreateConnection()!;
-connection.ConnectionString = "Data Source=lesson7.db";
+connection.ConnectionString = "Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres";
 connection.Open();
 
 using (DbCommand create = factory.CreateCommand()!)
