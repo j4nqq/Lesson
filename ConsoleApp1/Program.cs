@@ -10,8 +10,6 @@ namespace dot.net.Lesson13
         const string SourceConn = "Host=wotacoma.ru;Port=5090;Username=students;Password=asd123qwe4ewq321dsa;Database=9/3-RPO-24/1";
         const string TargetConn = "Host=wotacoma.ru;Port=5090;Username=j4nqq;Password=bananas228;Database=j4nqq";
 
-        const string GroupName = "9/3-RPO-24/1";
-
         public static void Main()
         {
             DbProviderFactory factory = NpgsqlFactory.Instance;
@@ -38,39 +36,26 @@ namespace dot.net.Lesson13
                 dst.Open();
 
                 Exec(factory, dst, """
-                    CREATE TABLE IF NOT EXISTS groups (
-                        id   SERIAL PRIMARY KEY,
-                        name TEXT NOT NULL UNIQUE
-                    )
-                    """);
-
-                Exec(factory, dst, """
                     CREATE TABLE IF NOT EXISTS students (
                         id         SERIAL PRIMARY KEY,
                         nickname   TEXT NOT NULL,
                         first_name TEXT NOT NULL,
                         last_name  TEXT NOT NULL,
-                        group_id   INT  REFERENCES groups(id),
                         UNIQUE (nickname, first_name, last_name)
                     )
                     """);
-
-                Exec(factory, dst,
-                    "INSERT INTO groups (name) VALUES (@name) ON CONFLICT DO NOTHING",
-                    ("@name", GroupName));
 
                 int added = 0;
                 foreach (DataRow r in source.Rows)
                 {
                     added += Exec(factory, dst, """
-                        INSERT INTO students (nickname, first_name, last_name, group_id)
-                        VALUES (@n, @f, @l, (SELECT id FROM groups WHERE name = @g))
+                        INSERT INTO students (nickname, first_name, last_name)
+                        VALUES (@n, @f, @l)
                         ON CONFLICT DO NOTHING
                         """,
                         ("@n", r["nickname"]),
                         ("@f", r["first_name"]),
-                        ("@l", r["last_name"]),
-                        ("@g", GroupName));
+                        ("@l", r["last_name"]));
                 }
                 Console.WriteLine($"Перенесено в вашу БД: {added}");
             }
