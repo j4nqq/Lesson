@@ -7,75 +7,89 @@ namespace dot.net.Lesson13
 {
     public class Result
     {
+        const string SourceConn = "Host=wotacoma.ru;Port=5090;Username=students;Password=asd123qwe4ewq321dsa;Database=9/3-RPO-24/1";
+        const string TargetConn = "Host=wotacoma.ru;Port=5090;Username=j4nqq;Password=bananas228;Database=j4nqq";
+
+        const string GroupName = "9/3-RPO-24/1";
+
         public static void Main()
         {
-            string connString = "Host=wotacoma.ru;Port=5090;Username=students;Password=asd123qwe4ewq321dsa;Database=9/3-RPO-24/1";
-
-            string nickname = "j4nqq";
-            string firstName = "Иосиф";
-            string lastName = "Колегов";
-
             DbProviderFactory factory = NpgsqlFactory.Instance;
-            var table = new DataTable();
 
-            DbConnection conn = factory.CreateConnection()!;
-            conn.ConnectionString = connString;
-
-            try
+            var source = new DataTable();
+            using (DbConnection src = factory.CreateConnection()!)
             {
-                conn.Open();
+                src.ConnectionString = SourceConn;
+                src.Open();
 
-                DbCommand insertCmd = factory.CreateCommand()!;
-                insertCmd.Connection = conn;
-                insertCmd.CommandText = """
-                    INSERT INTO students_lesson13 (nickname, first_name, last_name)
-                    VALUES (@nickname, @first_name, @last_name)
-                    ON CONFLICT DO NOTHING
-                    """;
+                DbCommand cmd = factory.CreateCommand()!;
+                cmd.Connection = src;
+                cmd.CommandText = "SELECT nickname, first_name, last_name FROM students_lesson13";
 
-                AddParam(insertCmd, "@nickname", nickname);
-                AddParam(insertCmd, "@first_name", firstName);
-                AddParam(insertCmd, "@last_name", lastName);
-
-                int rows = insertCmd.ExecuteNonQuery();
-                Console.WriteLine(rows > 0
-                    ? "Студент добавлен"
-                    : "Уже добавлен, вставки не буде! ");
-
-                DbCommand selectCmd = factory.CreateCommand()!;
-                selectCmd.Connection = conn;
-                selectCmd.CommandText = "SELECT * FROM students_lesson2";
-
-                DbDataAdapter adapter = factory.CreateDataAdapter()!;
-                adapter.SelectCommand = selectCmd;
-                adapter.Fill(table);
+                DbDataAdapter ad = factory.CreateDataAdapter()!;
+                ad.SelectCommand = cmd;
+                ad.Fill(source);
             }
-            finally
+            Console.WriteLine($"Прочитано из источника: {source.Rows.Count}");
+
+            using (DbConnection dst = factory.CreateConnection()!)
             {
-                conn.Close();
-                conn.Dispose();
-            }
+                dst.ConnectionString = TargetConn;
+                dst.Open();
 
-            Console.WriteLine($"Загружено строк: {table.Rows.Count}");
+                Exec(factory, dst, """
+                    CREATE TABLE IF NOT EXISTS groups (
+                        id   SERIAL PRIMARY KEY,
+                        name TEXT NOT NULL UNIQUE
+                    )
+                    """);
 
-            foreach (DataColumn col in table.Columns)
-                Console.Write($"{col.ColumnName,-20} | ");
-            Console.WriteLine();
+                Exec(factory, dst, """
+                    CREATE TABLE IF NOT EXISTS students (
+                        id         SERIAL PRIMARY KEY,
+                        nickname   TEXT NOT NULL,
+                        first_name TEXT NOT NULL,
+                        last_name  TEXT NOT NULL,
+                        group_id   INT  REFERENCES groups(id),
+                        UNIQUE (nickname, first_name, last_name)
+                    )
+                    """);
 
-            foreach (DataRow row in table.Rows)
-            {
-                foreach (var item in row.ItemArray)
-                    Console.Write($"{item,-20} | ");
-                Console.WriteLine();
+                Exec(factory, dst,
+                    "INSERT INTO groups (name) VALUES (@name) ON CONFLICT DO NOTHING",
+                    ("@name", GroupName));
+
+                int added = 0;
+                foreach (DataRow r in source.Rows)
+                {
+                    added += Exec(factory, dst, """
+                        INSERT INTO students (nickname, first_name, last_name, group_id)
+                        VALUES (@n, @f, @l, (SELECT id FROM groups WHERE name = @g))
+                        ON CONFLICT DO NOTHING
+                        """,
+                        ("@n", r["nickname"]),
+                        ("@f", r["first_name"]),
+                        ("@l", r["last_name"]),
+                        ("@g", GroupName));
+                }
+                Console.WriteLine($"Перенесено в вашу БД: {added}");
             }
         }
 
-        private static void AddParam(DbCommand cmd, string name, object value)
+        private static int Exec(DbProviderFactory factory, DbConnection conn, string sql,
+                                params (string name, object value)[] args)
         {
-            DbParameter p = cmd.CreateParameter();
-            p.ParameterName = name;
-            p.Value = value;
-            cmd.Parameters.Add(p);
+            DbCommand cmd = factory.CreateCommand()!;
+            cmd.Connection = conn;
+            cmd.CommandText = sql;
+            foreach (var (name, value) in args)
+            {
+                DbParameter p = cmd.CreateParameter();
+                p.ParameterName = name;
+                p.Value = value;
+                cmd.Parameters.Add(p);
+            }
+            return cmd.ExecuteNonQuery();
         }
     }
 }
