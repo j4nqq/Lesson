@@ -36,6 +36,8 @@ namespace dot.net.Lesson13
                     5. Вывести журнал изменений
                     6. RejectChanges() и проверка, что таблица вернулась к исходной
                     7. Перезагрузить данные из БД
+                    8. Сохранить изменения в БД (Update в транзакции)
+                    9. Проверить содержимое БД отдельным запросом
                     0. Выход
                     """);
                 Console.Write("Ваш выбор: ");
@@ -107,6 +109,15 @@ namespace dot.net.Lesson13
                         Console.WriteLine($"Данные перезагружены, строк: {table.Rows.Count}. Соединение закрыто.");
                         break;
 
+                    case "8":
+                        if (SaveChanges(table, factory))
+                            original = Snapshot(table);
+                        break;
+
+                    case "9":
+                        VerifyInDatabase(factory);
+                        break;
+
                     case "0":
                         return;
 
@@ -116,6 +127,156 @@ namespace dot.net.Lesson13
                 }
             }
         }
+
+        // ---------------------------------------------------------------
+        //  СОХРАНЕНИЕ: параметризованные команды + транзакция
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// Сохраняет все изменения одной транзакцией.
+        /// Возвращает true, если всё записано; false — если была ошибка и произошёл откат.
+        /// </summary>
+        private static bool SaveChanges(DataTable table, DbProviderFactory factory)
+        {
+            // Копия только изменённых строк (Added / Modified / Deleted).
+            // Update() выполняем над копией: если что-то упадёт, состояния
+            // строк в основной таблице останутся нетронутыми.
+            DataTable? changes = table.GetChanges();
+            if (changes == null)
+            {
+                Console.WriteLine("Нет изменений для сохранения.");
+                return true;
+            }
+
+            Console.WriteLine("\n===== RowState перед сохранением =====");
+            ShowAll(table);
+
+            using DbConnection connection = factory.CreateConnection()
+                ?? throw new InvalidOperationException();
+            connection.ConnectionString = ConnString;
+            connection.Open();
+
+            using DbTransaction transaction = connection.BeginTransaction();
+
+            try
+            {
+                using DbDataAdapter adapter = factory.CreateDataAdapter()
+                    ?? throw new InvalidOperationException();
+
+                ConfigureCommands(adapter, connection, transaction);
+
+                int affected = adapter.Update(changes);
+                transaction.Commit();
+
+                // Только после успешного COMMIT фиксируем изменения в памяти:
+                // Added/Modified -> Unchanged, Deleted-строки физически исчезают.
+                table.AcceptChanges();
+
+                Console.WriteLine($"\nСохранено строк: {affected}. Транзакция зафиксирована (COMMIT).");
+                Console.WriteLine("\n===== RowState после сохранения =====");
+                ShowAll(table);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                try { transaction.Rollback(); }
+                catch (Exception rbEx) { Console.WriteLine($"Ошибка при откате: {rbEx.Message}"); }
+
+                Console.WriteLine("\n!!! ОШИБКА СОХРАНЕНИЯ !!!");
+                Console.WriteLine(ex is PostgresException pg
+                    ? $"PostgreSQL [{pg.SqlState}]: {pg.MessageText}"
+                    : ex.Message);
+
+                Console.WriteLine("""
+
+                    Транзакция откатена (ROLLBACK): в БД не попало НИ ОДНО из изменений этой группы.
+                    В памяти ничего не потеряно: AcceptChanges() не вызывался, поэтому все строки
+                    сохранили свои состояния (Added / Modified / Deleted) и ждут повторного сохранения.
+                    Исправьте проблему (например, уникальный nickname) или откатите правки пунктом 6.
+                    """);
+
+                Console.WriteLine("Состояния строк в памяти после ошибки:");
+                ShowAll(table);
+                return false;
+            }
+        }
+
+        private static void ConfigureCommands(DbDataAdapter adapter, DbConnection connection, DbTransaction transaction)
+        {
+            // Предполагается, что nickname — первичный ключ таблицы.
+            // Для UPDATE/DELETE ключ берём из версии Original (значение, которое было в БД).
+
+            adapter.InsertCommand = MakeCommand(connection, transaction,
+                "INSERT INTO students_lesson13 (nickname, first_name, last_name) " +
+                "VALUES (@nickname, @first_name, @last_name)",
+                ("nickname", "nickname", DataRowVersion.Current),
+                ("first_name", "first_name", DataRowVersion.Current),
+                ("last_name", "last_name", DataRowVersion.Current));
+
+            adapter.UpdateCommand = MakeCommand(connection, transaction,
+                "UPDATE students_lesson13 " +
+                "SET nickname = @nickname, first_name = @first_name, last_name = @last_name " +
+                "WHERE nickname = @old_nickname",
+                ("nickname", "nickname", DataRowVersion.Current),
+                ("first_name", "first_name", DataRowVersion.Current),
+                ("last_name", "last_name", DataRowVersion.Current),
+                ("old_nickname", "nickname", DataRowVersion.Original));
+
+            adapter.DeleteCommand = MakeCommand(connection, transaction,
+                "DELETE FROM students_lesson13 WHERE nickname = @old_nickname",
+                ("old_nickname", "nickname", DataRowVersion.Original));
+        }
+
+        private static DbCommand MakeCommand(
+            DbConnection connection,
+            DbTransaction transaction,
+            string sql,
+            params (string Name, string Column, DataRowVersion Version)[] parameters)
+        {
+            DbCommand cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.Transaction = transaction;
+            cmd.UpdatedRowSource = UpdateRowSource.None;
+
+            foreach (var (name, column, version) in parameters)
+            {
+                DbParameter p = cmd.CreateParameter();
+                p.ParameterName = name;
+                p.DbType = DbType.String;
+                p.SourceColumn = column;
+                p.SourceVersion = version;
+                cmd.Parameters.Add(p);
+            }
+            return cmd;
+        }
+
+        /// <summary>Отдельное соединение и отдельный SELECT — смотрим, что реально лежит в БД.</summary>
+        private static void VerifyInDatabase(DbProviderFactory factory)
+        {
+            Console.WriteLine("\n===== Содержимое БД (отдельный запрос) =====");
+
+            using DbConnection connection = factory.CreateConnection()
+                ?? throw new InvalidOperationException();
+            connection.ConnectionString = ConnString;
+            connection.Open();
+
+            using DbCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT nickname, first_name, last_name FROM students_lesson13 ORDER BY nickname";
+
+            using DbDataReader reader = command.ExecuteReader();
+            int count = 0;
+            while (reader.Read())
+            {
+                Console.WriteLine($"{reader.GetString(0),-15} | {reader.GetString(1),-18} | {reader.GetString(2),-15}");
+                count++;
+            }
+            Console.WriteLine($"Всего строк в БД: {count}");
+        }
+
+        // ---------------------------------------------------------------
+        //  Остальной код без изменений
+        // ---------------------------------------------------------------
 
         private static void PrintJournal(DataTable table)
         {
