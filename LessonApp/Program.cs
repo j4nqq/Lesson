@@ -128,19 +128,9 @@ namespace dot.net.Lesson13
             }
         }
 
-        // ---------------------------------------------------------------
-        //  СОХРАНЕНИЕ: параметризованные команды + транзакция
-        // ---------------------------------------------------------------
-
-        /// <summary>
-        /// Сохраняет все изменения одной транзакцией.
-        /// Возвращает true, если всё записано; false — если была ошибка и произошёл откат.
-        /// </summary>
         private static bool SaveChanges(DataTable table, DbProviderFactory factory)
         {
-            // Копия только изменённых строк (Added / Modified / Deleted).
-            // Update() выполняем над копией: если что-то упадёт, состояния
-            // строк в основной таблице останутся нетронутыми.
+
             DataTable? changes = table.GetChanges();
             if (changes == null)
             {
@@ -168,8 +158,6 @@ namespace dot.net.Lesson13
                 int affected = adapter.Update(changes);
                 transaction.Commit();
 
-                // Только после успешного COMMIT фиксируем изменения в памяти:
-                // Added/Modified -> Unchanged, Deleted-строки физически исчезают.
                 table.AcceptChanges();
 
                 Console.WriteLine($"\nСохранено строк: {affected}. Транзакция зафиксирована (COMMIT).");
@@ -203,8 +191,7 @@ namespace dot.net.Lesson13
 
         private static void ConfigureCommands(DbDataAdapter adapter, DbConnection connection, DbTransaction transaction)
         {
-            // Предполагается, что nickname — первичный ключ таблицы.
-            // Для UPDATE/DELETE ключ берём из версии Original (значение, которое было в БД).
+
 
             adapter.InsertCommand = MakeCommand(connection, transaction,
                 "INSERT INTO students_lesson13 (nickname, first_name, last_name) " +
@@ -250,7 +237,6 @@ namespace dot.net.Lesson13
             return cmd;
         }
 
-        /// <summary>Отдельное соединение и отдельный SELECT — смотрим, что реально лежит в БД.</summary>
         private static void VerifyInDatabase(DbProviderFactory factory)
         {
             Console.WriteLine("\n===== Содержимое БД (отдельный запрос) =====");
@@ -273,10 +259,6 @@ namespace dot.net.Lesson13
             }
             Console.WriteLine($"Всего строк в БД: {count}");
         }
-
-        // ---------------------------------------------------------------
-        //  Остальной код без изменений
-        // ---------------------------------------------------------------
 
         private static void PrintJournal(DataTable table)
         {
