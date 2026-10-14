@@ -1,7 +1,9 @@
 ﻿using Npgsql;
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Linq;
 using System.Text;
 
 namespace dot.net.Lesson13
@@ -18,7 +20,7 @@ namespace dot.net.Lesson13
             DbProviderFactory factory = NpgsqlFactory.Instance;
 
             DataTable table = LoadTable(factory);
-            DataRow? pendingRow = null;
+            List<string> original = Snapshot(table);
 
             Console.WriteLine($"Загружено строк: {table.Rows.Count}. Соединение с БД закрыто.");
 
@@ -28,14 +30,12 @@ namespace dot.net.Lesson13
 
                     ========== МЕНЮ ==========
                     1. Показать все строки и их состояния
-                    2. Создать новую строку (NewRow) - состояние до добавления
-                    3. Добавить созданную строку в таблицу (Rows.Add)
-                    4. Изменить имя существующего студента
-                    5. Удалить студента (Delete)
-                    6. RejectChanges() - откатить изменения
-                    7. AcceptChanges() - принять изменения
-                    8. Сводка по количеству строк в каждом состоянии
-                    9. Перезагрузить данные из БД (сброс локальных изменений)
+                    2. Изменить имя студента
+                    3. Добавить нового студента
+                    4. Удалить студента
+                    5. Вывести журнал изменений
+                    6. RejectChanges() и проверка, что таблица вернулась к исходной
+                    7. Перезагрузить данные из БД
                     0. Выход
                     """);
                 Console.Write("Ваш выбор: ");
@@ -48,75 +48,62 @@ namespace dot.net.Lesson13
                         break;
 
                     case "2":
-                        pendingRow = table.NewRow();
-                        pendingRow["nickname"] = Ask("nickname");
-                        pendingRow["first_name"] = Ask("Имя (first_name)");
-                        pendingRow["last_name"] = Ask("Фамилия (last_name)");
-                        Console.WriteLine("Строка создана, но в таблицу не добавлена.");
-                        ShowRow("Состояние новой строки", pendingRow);
-                        break;
-
-                    case "3":
-                        if (pendingRow == null || pendingRow.RowState != DataRowState.Detached)
-                        {
-                            Console.WriteLine("Сначала создайте новую строку (пункт 2).");
-                            break;
-                        }
-                        table.Rows.Add(pendingRow);
-                        ShowRow("Состояние после Rows.Add()", pendingRow);
-                        break;
-
-                    case "4":
                         {
                             DataRow? row = PickRow(table, "Кого переименовать");
                             if (row == null) break;
                             row["first_name"] = Ask("Новое имя");
-                            ShowRow("Состояние после изменения", row);
+                            Console.WriteLine($"Состояние строки: {row.RowState}");
                         }
                         break;
 
-                    case "5":
+                    case "3":
+                        {
+                            DataRow newRow = table.NewRow();
+                            newRow["nickname"] = Ask("nickname");
+                            newRow["first_name"] = Ask("Имя (first_name)");
+                            newRow["last_name"] = Ask("Фамилия (last_name)");
+                            table.Rows.Add(newRow);
+                            Console.WriteLine($"Студент добавлен. Состояние строки: {newRow.RowState}");
+                        }
+                        break;
+
+                    case "4":
                         {
                             DataRow? row = PickRow(table, "Кого удалить");
                             if (row == null) break;
                             row.Delete();
-                            ShowRow("Состояние после Delete()", row);
+                            Console.WriteLine($"Состояние строки: {row.RowState}");
                         }
+                        break;
+
+                    case "5":
+                        Console.WriteLine("\n===== Журнал изменений =====");
+                        PrintJournal(table);
                         break;
 
                     case "6":
                         table.RejectChanges();
-                        Console.WriteLine("RejectChanges() выполнен: изменённые и удалённые строки восстановлены, добавленные исчезли.");
-                        if (pendingRow != null)
-                            ShowRow("Ранее добавленная строка", pendingRow);
-                        Console.WriteLine($"Строк в таблице: {table.Rows.Count}");
+                        Console.WriteLine("\n===== RejectChanges() =====");
+
+                        List<string> after = Snapshot(table);
+                        bool allUnchanged = table.Rows.Cast<DataRow>()
+                            .All(r => r.RowState == DataRowState.Unchanged);
+                        bool same = original.SequenceEqual(after);
+
+                        Console.WriteLine($"Строк в исходной таблице: {original.Count}, сейчас: {after.Count}");
+                        Console.WriteLine($"Все строки Unchanged: {(allUnchanged ? "да" : "нет")}");
+                        Console.WriteLine($"Содержимое совпадает с исходным: {(same ? "да" : "нет")}");
+                        Console.WriteLine(same && allUnchanged
+                            ? "Таблица вернулась к состоянию до эксперимента."
+                            : "Таблица отличается от исходной!");
+
+                        Console.WriteLine("\nЖурнал после RejectChanges (должен быть пустым):");
+                        PrintJournal(table);
                         break;
 
                     case "7":
-                        table.AcceptChanges();
-                        Console.WriteLine("AcceptChanges() выполнен.");
-                        if (pendingRow != null)
-                            ShowRow("Ранее добавленная строка", pendingRow);
-                        Console.WriteLine($"Строк в таблице: {table.Rows.Count}");
-                        Console.WriteLine("""
-
-                            Почему это НЕ сохраняет изменения в PostgreSQL:
-                            AcceptChanges() работает только внутри DataTable: он делает текущие значения
-                            «исходными» (Added/Modified -> Unchanged) и физически убирает Deleted-строки
-                            из локальной коллекции. SQL-команды при этом не отправляются.
-                            В БД изменения уходят только при DataAdapter.Update(), который по RowState
-                            выполняет InsertCommand / UpdateCommand / DeleteCommand. После AcceptChanges
-                            все строки уже Unchanged, и Update() было бы нечего отправлять.
-                            """);
-                        break;
-
-                    case "8":
-                        ShowSummary(table);
-                        break;
-
-                    case "9":
                         table = LoadTable(factory);
-                        pendingRow = null;
+                        original = Snapshot(table);
                         Console.WriteLine($"Данные перезагружены, строк: {table.Rows.Count}. Соединение закрыто.");
                         break;
 
@@ -128,6 +115,46 @@ namespace dot.net.Lesson13
                         break;
                 }
             }
+        }
+
+        private static void PrintJournal(DataTable table)
+        {
+            int count = 0;
+
+            foreach (DataRow row in table.Rows)
+            {
+                switch (row.RowState)
+                {
+                    case DataRowState.Modified:
+                        Console.WriteLine(
+                            $"[MODIFIED] {FullName(row, DataRowVersion.Original)} → {FullName(row, DataRowVersion.Current)}");
+                        count++;
+                        break;
+
+                    case DataRowState.Added:
+                        Console.WriteLine($"[ADDED]    {FullName(row, DataRowVersion.Current)}");
+                        count++;
+                        break;
+
+                    case DataRowState.Deleted:
+                        Console.WriteLine($"[DELETED]  {FullName(row, DataRowVersion.Original)}");
+                        count++;
+                        break;
+                }
+            }
+
+            if (count == 0)
+                Console.WriteLine("(изменений нет)");
+        }
+
+        private static string FullName(DataRow row, DataRowVersion version)
+            => $"{row["first_name", version]} {row["last_name", version]}";
+
+        private static List<string> Snapshot(DataTable table)
+        {
+            return table.Rows.Cast<DataRow>()
+                .Select(r => $"{r["nickname"]}|{r["first_name"]}|{r["last_name"]}")
+                .ToList();
         }
 
         private static DataTable LoadTable(DbProviderFactory factory)
@@ -191,40 +218,8 @@ namespace dot.net.Lesson13
                 Console.WriteLine($"{i,3} | {Format(table.Rows[i])}");
         }
 
-        private static void ShowRow(string title, DataRow row)
-        {
-            Console.WriteLine($"--- {title} ---");
-            Console.WriteLine(Format(row));
-        }
-
-        private static void ShowSummary(DataTable table)
-        {
-            Console.WriteLine($"\nВсего строк в коллекции: {table.Rows.Count}");
-            foreach (DataRowState state in new[]
-                     { DataRowState.Unchanged, DataRowState.Added,
-                       DataRowState.Modified, DataRowState.Deleted })
-            {
-                int count = 0;
-                foreach (DataRow r in table.Rows)
-                    if (r.RowState == state) count++;
-                Console.WriteLine($"{state,-10}: {count}");
-            }
-        }
-
         private static string Format(DataRow r)
         {
-            if (r.RowState == DataRowState.Detached)
-            {
-                try
-                {
-                    return $"{r.RowState,-10} | {r["nickname"],-15} | {r["first_name"],-18} | {r["last_name"],-15}";
-                }
-                catch (RowNotInTableException)
-                {
-                    return $"{r.RowState,-10} | (строка удалена из таблицы, данных нет)";
-                }
-            }
-
             DataRowVersion v = r.RowState == DataRowState.Deleted
                 ? DataRowVersion.Original
                 : DataRowVersion.Current;
