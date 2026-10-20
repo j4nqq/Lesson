@@ -1,36 +1,67 @@
-﻿using ConsoleApp1.Models;
+﻿using ConsoleApp1.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
-var students = new List<Student>
+var builder = Host.CreateApplicationBuilder(args);
+
+string connectionString =
+    builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("Нет строки подключения");
+
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseNpgsql(connectionString));
+
+using var host = builder.Build();
+using var scope = host.Services.CreateScope();
+
+var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+try
 {
-    new()
+    bool canConnect = await db.Database.CanConnectAsync();
+
+    if (!canConnect)
     {
-        FirstName = "Иван",
-        LastName = "Иванов",
-        Age = 20,
-        IsActive = true
-    },
-    new()
-    {
-        FirstName = "Анна",
-        LastName = "Петрова",
-        Age = 21,
-        IsActive = true
-    },
-    new()
-    {
-        FirstName = "Сергей",
-        LastName = "Сидоров",
-        Age = 17,
-        IsActive = false
+        Console.WriteLine("Нет подключения");
+        return;
     }
-};
 
-Console.WriteLine("Активные студенты:");
-foreach (var s in students.Where(s => s.IsActive))
-{
-    Console.WriteLine($"{s.FirstName} {s.LastName}, {s.Age}");
+    Console.WriteLine("Подключено");
+    Console.WriteLine($"База: {db.Database.GetDbConnection().Database}");
+
+    var students = await db.Students.ToListAsync();
+
+    if (students.Count == 0)
+    {
+        Console.WriteLine("Студентов нет");
+    }
+    else
+    {
+        Console.WriteLine();
+        Console.WriteLine("Студенты:");
+
+        foreach (var student in students)
+        {
+            Console.WriteLine(
+                $"{student.Id}: {student.FirstName} {student.LastName}, {student.Age}");
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"Всего: {students.Count}");
 }
-
-Console.WriteLine();
-Console.WriteLine($"Количество студентов: {students.Count}");
-Console.WriteLine($"Средний возраст: {students.Average(s => s.Age):F1}");
+catch (Exception ex)
+{
+    Console.WriteLine($"Ошибка: {ex.Message}");
+}
+// Контрольные вопросы
+// 1. Какова основная задача DbContext?
+// Ответ: Управлять взаимодействием приложения с EF Core и базой данных
+// 2. Что представляет собой DbSet?
+// Ответ: Набор сущностей Student, доступный через контекст
+// 3. Что делает AddDbContext?
+// Ответ: Регистрирует контекст в контейнере зависимостей
+// 4. Когда выполняется запрос в выражении db.Students.ToListAsync()?
+// Ответ: При материализации запроса через ToListAsync
