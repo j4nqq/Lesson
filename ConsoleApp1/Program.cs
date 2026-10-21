@@ -29,6 +29,7 @@ while (true)
     Console.WriteLine("2. Добавить студента");
     Console.WriteLine("3. Изменить возраст");
     Console.WriteLine("4. Удалить студента");
+    Console.WriteLine("5. Перевести студента в другую группу");
     Console.WriteLine("0. Выход");
     Console.Write("Выбор: ");
 
@@ -43,6 +44,7 @@ while (true)
             case "2": await AddStudent(); break;
             case "3": await ChangeAge(); break;
             case "4": await DeleteStudent(); break;
+            case "5": await TransferStudent(); break;
             default: Console.WriteLine("Неизвестный пункт меню."); break;
         }
     }
@@ -104,6 +106,8 @@ async Task AddStudent()
         GroupId = groupId.Value
     });
 
+    // SaveChangesAsync отправляет в базу все накопленные изменения (INSERT/UPDATE/DELETE);
+    // до его вызова Add, Remove и смена свойств меняют только состояние в памяти.
     await db.SaveChangesAsync();
     Console.WriteLine("Студент добавлен.");
 }
@@ -143,6 +147,44 @@ async Task DeleteStudent()
     db.Students.Remove(student);
     await db.SaveChangesAsync();
     Console.WriteLine("Студент удалён.");
+}
+
+async Task TransferStudent()
+{
+    int? id = ReadInt("Id студента: ");
+    var student = id is null
+        ? null
+        : await db.Students.Include(s => s.Group).FirstOrDefaultAsync(s => s.Id == id);
+    if (student is null)
+    {
+        Console.WriteLine("Студент не найден.");
+        return;
+    }
+
+    Console.WriteLine($"Текущая группа: {student.Group.Name}");
+
+    Console.WriteLine("Доступные группы:");
+    var groups = await db.Groups.OrderBy(g => g.Name).ToListAsync();
+    foreach (var g in groups)
+        Console.WriteLine($"{g.Id}: {g.Name}");
+
+    int? newGroupId = ReadInt("Id новой группы: ");
+    var newGroup = groups.FirstOrDefault(g => g.Id == newGroupId);
+    if (newGroup is null)
+    {
+        Console.WriteLine("Группа не найдена.");
+        return;
+    }
+
+    if (newGroup.Id == student.GroupId)
+    {
+        Console.WriteLine("Студент уже состоит в этой группе.");
+        return;
+    }
+
+    student.GroupId = newGroup.Id;
+    await db.SaveChangesAsync();
+    Console.WriteLine($"Студент {student.LastName} {student.FirstName} переведён в группу {newGroup.Name}.");
 }
 
 int? ReadInt(string prompt)
