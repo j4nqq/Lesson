@@ -1,0 +1,11 @@
+﻿using lesson19.Models;
+using Microsoft.EntityFrameworkCore;
+
+class AppDbContext : DbContext
+{
+    public DbSet<Student> Students => Set<Student>();
+
+    public AppDbContext(DbContextOptions opt) : base(opt)
+    {
+    }
+}
