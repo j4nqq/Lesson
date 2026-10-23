@@ -305,3 +305,9 @@ while (true)
         Console.WriteLine($"Ошибка: {ex.Message}");
     }
 }
+// 4. DataReader — читает построчно через открытое соединение, только вперёд, данные не хранит (connected).
+//    DataTable — таблица в памяти, работает без соединения, данные можно менять (disconnected).
+// 8. LINQ to SQL — устаревший, только SQL Server, DataContext.
+//    EF Core — современный, много СУБД, DbContext/DbSet, миграции, Include, change tracking.
+// 12. Dapper — микро-ORM: SQL пишешь сам, он только маппит результат в объекты.
+//     EF Core — полный ORM: сам строит SQL из LINQ, отслеживает изменения, есть миграции.
