@@ -1,6 +1,4 @@
-﻿// TODO (задание 4): Заменить int.Parse на int.TryParse в указанном сценарии; неверный ввод не должен завершать программу.
-
-using DatabaseCourseExam.AdoNet;
+﻿using DatabaseCourseExam.AdoNet;
 using System.Data;
 using DatabaseCourseExam.EntityFramework;
 using DatabaseCourseExam.DapperTasks;
@@ -25,6 +23,7 @@ while (true)
     Console.WriteLine("12. Dapper: изменить возраст");
     Console.WriteLine("13. Dapper: показать курсы");
     Console.WriteLine("14. Dapper: записать студента на курс");
+    Console.WriteLine("15. Добавить студента в DataTable");
     Console.WriteLine("0. Выход");
     Console.Write("Выберите действие: ");
 
@@ -38,27 +37,54 @@ while (true)
                 await AdoNetTasks.ShowStudentsAsync();
                 break;
 
+            //ЗАДАНИЕ 4
             case "2":
-                Console.Write("ID студента: ");
-                int studentId = int.Parse(Console.ReadLine()!);
+                {
+                    Console.Write("ID студента: ");
 
-                Console.Write("Новый возраст: ");
-                int age = int.Parse(Console.ReadLine()!);
+                    if (!int.TryParse(Console.ReadLine(), out int studentId))
+                    {
+                        Console.WriteLine("Некорректный ID.");
+                        break;
+                    }
 
-                await AdoNetTasks.UpdateStudentAgeAsync(studentId, age);
-                break;
+                    Console.Write("Новый возраст: ");
+
+                    if (!int.TryParse(Console.ReadLine(), out int age))
+                    {
+                        Console.WriteLine("Введите целое число.");
+                        break;
+                    }
+
+                    await AdoNetTasks.UpdateStudentAgeAsync(studentId, age);
+                    break;
+                }
 
             case "3":
-                Console.Write("ID студента: ");
-                int enrollmentStudentId = int.Parse(Console.ReadLine()!);
+                {
+                    Console.Write("ID студента: ");
 
-                Console.Write("ID курса: ");
-                int courseId = int.Parse(Console.ReadLine()!);
+                    if (!int.TryParse(
+                            Console.ReadLine(),
+                            out int enrollmentStudentId))
+                    {
+                        Console.WriteLine("Некорректный ID.");
+                        break;
+                    }
 
-                await AdoNetTasks.EnrollStudentAsync(
-                    enrollmentStudentId,
-                    courseId);
-                break;
+                    Console.Write("ID курса: ");
+
+                    if (!int.TryParse(Console.ReadLine(), out int courseId))
+                    {
+                        Console.WriteLine("Некорректный ID.");
+                        break;
+                    }
+
+                    await AdoNetTasks.EnrollStudentAsync(
+                        enrollmentStudentId,
+                        courseId);
+                    break;
+                }
 
             case "4":
                 studentsTable = await DisconnectedTasks.LoadStudentsAsync();
@@ -67,29 +93,46 @@ while (true)
                 break;
 
             case "5":
-                if (studentsTable is null)
                 {
-                    Console.WriteLine("Сначала загрузите данные (пункт 4).");
+                    if (studentsTable is null)
+                    {
+                        Console.WriteLine("Сначала загрузите данные (пункт 4).");
+                        break;
+                    }
+
+                    Console.Write("ID студента: ");
+
+                    if (!int.TryParse(
+                            Console.ReadLine(),
+                            out int disconnectedStudentId))
+                    {
+                        Console.WriteLine("Некорректный ID.");
+                        break;
+                    }
+
+                    Console.Write("Новый возраст: ");
+
+                    if (!int.TryParse(
+                            Console.ReadLine(),
+                            out int disconnectedAge))
+                    {
+                        Console.WriteLine("Введите целое число.");
+                        break;
+                    }
+
+                    if (disconnectedAge is < 14 or > 100)
+                    {
+                        Console.WriteLine("Возраст должен быть от 14 до 100.");
+                        break;
+                    }
+
+                    DisconnectedTasks.ChangeAgeInMemory(
+                        studentsTable,
+                        disconnectedStudentId,
+                        disconnectedAge);
                     break;
                 }
-
-                Console.Write("ID студента: ");
-                int disconnectedStudentId = int.Parse(Console.ReadLine()!);
-
-                Console.Write("Новый возраст: ");
-                int disconnectedAge = int.Parse(Console.ReadLine()!);
-
-                if (disconnectedAge is < 14 or > 100)
-                {
-                    Console.WriteLine("Возраст должен быть от 14 до 100.");
-                    break;
-                }
-
-                DisconnectedTasks.ChangeAgeInMemory(
-                    studentsTable,
-                    disconnectedStudentId,
-                    disconnectedAge);
-                break;
+            //ЗАДАНИЕ 4
 
             case "6":
                 if (studentsTable is null)
@@ -203,6 +246,48 @@ while (true)
 
                     break;
                 }
+
+            //ЗАДАНИЕ 6
+            case "15":
+                {
+                    if (studentsTable is null)
+                    {
+                        Console.WriteLine("Сначала загрузите данные (пункт 4).");
+                        break;
+                    }
+
+                    Console.Write("Имя: ");
+                    string newFirstName = Console.ReadLine() ?? string.Empty;
+
+                    Console.Write("Фамилия: ");
+                    string newLastName = Console.ReadLine() ?? string.Empty;
+
+                    Console.Write("Возраст: ");
+
+                    if (!int.TryParse(Console.ReadLine(), out int newStudentAge))
+                    {
+                        Console.WriteLine("Введите целое число.");
+                        break;
+                    }
+
+                    Console.Write("ID группы: ");
+
+                    if (!int.TryParse(Console.ReadLine(), out int newStudentGroupId))
+                    {
+                        Console.WriteLine("Некорректный ID.");
+                        break;
+                    }
+
+                    DisconnectedTasks.AddStudentInMemory(
+                        studentsTable,
+                        newFirstName,
+                        newLastName,
+                        newStudentAge,
+                        newStudentGroupId);
+                    break;
+                }
+            //ЗАДАНИЕ 6
+
             case "0":
                 return;
 

@@ -1,5 +1,6 @@
 ﻿using DatabaseCourseExam.Data;
 using Dapper;
+using Npgsql;
 using DatabaseCourseExam.DapperTasks.DTO;
 
 namespace DatabaseCourseExam.DapperTasks;
@@ -32,12 +33,33 @@ public static class DapperStudentTasks
         }
     }
 
-    // TODO (задание 2): Проверить возраст и использовать число затронутых строк, чтобы отличить обновление от отсутствующего ID.
     public static async Task UpdateStudentAgeAsync(
         int studentId,
         int newAge)
     {
+        //ЗАДАНИЕ 2
+        if (newAge is < 14 or > 100)
+        {
+            Console.WriteLine("Возраст должен быть от 14 до 100.");
+            return;
+        }
+        //ЗАДАНИЕ 2
+
         await using var connection = DatabaseConnection.Create();
+
+        StudentDto? before = await connection.QuerySingleOrDefaultAsync<StudentDto>(
+            """
+            SELECT first_name AS FirstName, last_name AS LastName, age AS Age
+            FROM students
+            WHERE id = @StudentId;
+            """,
+            new { StudentId = studentId });
+
+        if (before is null)
+        {
+            Console.WriteLine($"Студент с ID {studentId} не найден. Ничего не изменено.");
+            return;
+        }
 
         const string sql = """
             UPDATE students
@@ -53,10 +75,13 @@ public static class DapperStudentTasks
                 StudentId = studentId
             });
 
+        //ЗАДАНИЕ 2
         Console.WriteLine(
             affectedRows == 0
                 ? "Студент не найден."
-                : $"Изменено записей: {affectedRows}");
+                : $"{before.FirstName} {before.LastName} (ID {studentId}): " +
+                  $"возраст {before.Age} → {newAge}. Изменено записей: {affectedRows}");
+        //ЗАДАНИЕ 2
     }
 
     public static async Task ShowCoursesAsync()
@@ -95,6 +120,56 @@ public static class DapperStudentTasks
 
         try
         {
+            string? studentName =
+                await connection.QuerySingleOrDefaultAsync<string>(
+                    """
+                    SELECT concat_ws(' ', first_name, last_name)
+                    FROM students
+                    WHERE id = @StudentId;
+                    """,
+                    new { StudentId = studentId },
+                    transaction);
+
+            if (studentName is null)
+            {
+                throw new InvalidOperationException(
+                    $"Студент с ID {studentId} не найден.");
+            }
+
+            string? courseName =
+                await connection.QuerySingleOrDefaultAsync<string>(
+                    """
+                    SELECT name
+                    FROM courses
+                    WHERE id = @CourseId;
+                    """,
+                    new { CourseId = courseId },
+                    transaction);
+
+            if (courseName is null)
+            {
+                throw new InvalidOperationException(
+                    $"Курс с ID {courseId} не найден.");
+            }
+
+            bool alreadyEnrolled =
+                await connection.QuerySingleAsync<bool>(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM student_courses
+                        WHERE student_id = @StudentId
+                          AND course_id = @CourseId);
+                    """,
+                    new { StudentId = studentId, CourseId = courseId },
+                    transaction);
+
+            if (alreadyEnrolled)
+            {
+                throw new InvalidOperationException(
+                    $"{studentName} уже записан на курс «{courseName}».");
+            }
+
             const string updateSql = """
                 UPDATE courses
                 SET available_places = available_places - 1
@@ -112,7 +187,7 @@ public static class DapperStudentTasks
             if (remainingPlaces is null)
             {
                 throw new InvalidOperationException(
-                    "Курс не найден или свободных мест нет.");
+                    $"На курсе «{courseName}» нет свободных мест.");
             }
 
             const string insertSql = """
@@ -131,13 +206,30 @@ public static class DapperStudentTasks
 
             await transaction.CommitAsync();
 
+            Console.WriteLine("Запись выполнена:");
+            Console.WriteLine($"  Студент: {studentName} (ID {studentId})");
+            Console.WriteLine($"  Курс: {courseName} (ID {courseId})");
             Console.WriteLine(
-                $"Студент записан на курс. Осталось мест: {remainingPlaces}");
+                $"  Свободных мест: {remainingPlaces + 1} → {remainingPlaces}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            await transaction.RollbackAsync();
+            Console.WriteLine($"Запись не выполнена: {ex.Message}");
+            Console.WriteLine("В базе ничего не изменилось.");
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            await transaction.RollbackAsync();
+            Console.WriteLine(
+                "Запись не выполнена: такая запись уже есть (сработал уникальный индекс).");
+            Console.WriteLine("В базе ничего не изменилось.");
         }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
             Console.WriteLine($"Операция отменена: {ex.Message}");
+            Console.WriteLine("В базе ничего не изменилось.");
         }
     }
 }

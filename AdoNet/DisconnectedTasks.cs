@@ -7,7 +7,6 @@ namespace DatabaseCourseExam.AdoNet;
 
 public static class DisconnectedTasks
 {
-    // TODO (задание 6): Реализовать добавление новой строки в DataTable с проверкой возраста и правильным RowState Added.
     public static async Task<DataTable> LoadStudentsAsync()
     {
         var table = new DataTable("Students");
@@ -30,22 +29,79 @@ public static class DisconnectedTasks
         return table;
     }
 
+    //ЗАДАНИЕ 6
+    public static void AddStudentInMemory(
+        DataTable table,
+        string firstName,
+        string lastName,
+        int age,
+        int groupId)
+    {
+        if (string.IsNullOrWhiteSpace(firstName) ||
+            string.IsNullOrWhiteSpace(lastName))
+        {
+            Console.WriteLine("Имя и фамилия не должны быть пустыми.");
+            return;
+        }
+
+        if (age is < 14 or > 100)
+        {
+            Console.WriteLine("Возраст должен быть от 14 до 100.");
+            return;
+        }
+
+        if (groupId <= 0)
+        {
+            Console.WriteLine("ID группы должен быть положительным числом.");
+            return;
+        }
+
+        int newId = 1;
+
+        foreach (DataRow existingRow in table.Rows)
+        {
+            if (existingRow.RowState == DataRowState.Deleted)
+            {
+                continue;
+            }
+
+            newId = Math.Max(newId, Convert.ToInt32(existingRow["id"]) + 1);
+        }
+
+        DataRow row = table.NewRow();
+        Console.WriteLine($"После NewRow(): {row.RowState}");
+
+        row["id"] = newId;
+        row["first_name"] = firstName.Trim();
+        row["last_name"] = lastName.Trim();
+        row["age"] = age;
+        row["group_id"] = groupId;
+
+        table.Rows.Add(row);
+        Console.WriteLine($"После Rows.Add(): {row.RowState}");
+        Console.WriteLine(
+            $"Добавлена строка: ID {newId} (временный), {row["first_name"]} " +
+            $"{row["last_name"]}, возраст {age}, группа {groupId}. " +
+            "В БД она не сохраняется.");
+    }
+    //ЗАДАНИЕ 6
+
     public static void PrintTable(DataTable table)
     {
         foreach (DataRow row in table.Rows)
         {
             Console.WriteLine(
                 $"{row["id"]}: {row["first_name"]} " +
-                $"{row["last_name"]}, возраст {row["age"]}");
+                $"{row["last_name"]}, возраст {row["age"]}  [{row.RowState}]");
         }
     }
 
-    // TODO (задание 1): Найти строку по первичному ключу, обработать отсутствие результата и не менять строку, если значение не изменилось.
     public static void ChangeAgeInMemory(
         DataTable table,
         int studentId,
         int newAge)
     {
+        //ЗАДАНИЕ 1
         DataRow? row = table.Rows.Find(studentId);
 
         if (row is null)
@@ -54,13 +110,24 @@ public static class DisconnectedTasks
             return;
         }
 
-        // Удалённый фрагмент: восстановите присваивание нового возраста DataRow.
+        if (!row.IsNull("age") && Convert.ToInt32(row["age"]) == newAge)
+        {
+            Console.WriteLine(
+                $"Возраст не изменился, строка не тронута. " +
+                $"Состояние строки: {row.RowState}");
+            return;
+        }
+
+        int oldAge = row.IsNull("age") ? 0 : Convert.ToInt32(row["age"]);
+        row["age"] = newAge;
+        //ЗАДАНИЕ 1
 
         Console.WriteLine(
-            $"Возраст изменён в памяти. Состояние строки: {row.RowState}");
+            $"ID {studentId}: возраст {oldAge} → {newAge} (только в памяти). " +
+            $"Состояние строки: {row.RowState}. " +
+            "В БД изменение попадёт после пункта 7.");
     }
 
-    // TODO (задание 5): После Update вывести количество сохранённых строк и проверить, остались ли строки в состоянии Modified.
     public static int SaveChanges(DataTable table)
     {
         using var connection = DatabaseConnection.Create();
@@ -83,8 +150,55 @@ public static class DisconnectedTasks
         using var adapter = new NpgsqlDataAdapter();
         adapter.UpdateCommand = command;
 
-        int affectedRows = adapter.Update(table);
+        //ЗАДАНИЕ 5
+        DataRow[] modifiedRows =
+            table.Select(null, null, DataViewRowState.ModifiedCurrent);
+
+        if (modifiedRows.Length == 0)
+        {
+            Console.WriteLine("Нет изменённых строк, сохранять нечего.");
+            return 0;
+        }
+
+        Console.WriteLine("Будет сохранено в БД:");
+
+        foreach (DataRow modifiedRow in modifiedRows)
+        {
+            Console.WriteLine(
+                $"  ID {modifiedRow["id"]}: возраст " +
+                $"{modifiedRow["age", DataRowVersion.Original]} → " +
+                $"{modifiedRow["age", DataRowVersion.Current]}");
+        }
+
+        int affectedRows = adapter.Update(modifiedRows);
         Console.WriteLine($"Сохранено изменений: {affectedRows}");
+
+        int stillModified = 0;
+        int pendingAdded = 0;
+
+        foreach (DataRow row in table.Rows)
+        {
+            if (row.RowState == DataRowState.Modified)
+            {
+                stillModified++;
+            }
+            else if (row.RowState == DataRowState.Added)
+            {
+                pendingAdded++;
+            }
+        }
+
+        Console.WriteLine(
+            stillModified == 0
+                ? "Строк в состоянии Modified не осталось."
+                : $"Внимание: строк в состоянии Modified осталось: {stillModified}");
+
+        if (pendingAdded > 0)
+        {
+            Console.WriteLine(
+                $"Добавленные строки (Added) в БД не сохраняются: {pendingAdded}");
+        }
+        //ЗАДАНИЕ 5
 
         return affectedRows;
     }
